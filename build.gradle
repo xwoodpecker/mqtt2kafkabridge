@@ -25,6 +25,7 @@ dependencies {
     compile group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.+'
     compile group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.+'
     compile group: 'org.bouncycastle', name: 'bcprov-jdk15on', version: '1.70'
+    compile group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.13.0'
 }
 
 jar {
