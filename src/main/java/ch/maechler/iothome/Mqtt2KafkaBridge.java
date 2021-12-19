@@ -33,11 +33,11 @@ import java.util.Properties;
 
 public class Mqtt2KafkaBridge implements MqttCallbackExtended {
     private final Logger logger = LogManager.getLogger(Mqtt2KafkaBridge.class);
-    private KafkaProducer<String, byte[]> kafkaProducer;
+    private KafkaProducer<String, String> kafkaProducer;
     private MqttClient mqttClient;
     private String mqttTopicSeparator, kafkaTopicSeparator;
     private String[] mqttTopics;
-    private boolean kafkaIncludeTopicName;
+    private boolean kafkaIncludeKey;
 
     public static void main(String[] args) {
         new Mqtt2KafkaBridge().run();
@@ -63,7 +63,7 @@ public class Mqtt2KafkaBridge implements MqttCallbackExtended {
         String mqttClientCaFile = Optional.ofNullable(System.getenv("MQTT_CLIENT_CA_FILE")).orElse("");
         String mqttClientCertFile = Optional.ofNullable(System.getenv("MQTT_CLIENT_CERT_FILE")).orElse("");
         String mqttClientKeyFile = Optional.ofNullable(System.getenv("MQTT_CLIENT_KEY_FILE")).orElse("");
-        kafkaIncludeTopicName = Boolean.parseBoolean(Optional.ofNullable(System.getenv("KAFKA_INCLUDE_TOPIC_NAME")).orElse("false"));
+        kafkaIncludeKey = Boolean.parseBoolean(Optional.ofNullable(System.getenv("KAFKA_INCLUDE_KEY")).orElse("false"));
 
         logger.info(
             "Configuration values: \n " +
@@ -77,15 +77,15 @@ public class Mqtt2KafkaBridge implements MqttCallbackExtended {
                     "MQTT_TOPIC_FILTER={} \n" +
                     "MQTT_CLEAN_SESSION={} \n" +
                     "MQTT_MAX_INFLIGHT={} \n" +
-                    "KAFKA_INCLUDE_TOPIC_NAME={} \n",
+                    "KAFKA_INCLUDE_KEY={} \n",
                 clientId, kafkaHost, kafkaTopicSeparator, mqttBrokerHost, mqttBrokerUser, mqttAutomaticReconnect,
-                mqttTopicSeparator, mqttTopics, mqttCleanSession, mqttMaxInflight, kafkaIncludeTopicName
+                mqttTopicSeparator, mqttTopics, mqttCleanSession, mqttMaxInflight, kafkaIncludeKey
         );
 
         kafkaProducerProperties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaHost);
         kafkaProducerProperties.put(ProducerConfig.CLIENT_ID_CONFIG, clientId);
         kafkaProducerProperties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        kafkaProducerProperties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
+        kafkaProducerProperties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
 
         try {
             logger.info("Connecting to MQTT and Kafka broker.");
@@ -221,17 +221,11 @@ public class Mqtt2KafkaBridge implements MqttCallbackExtended {
 
         String kafkaTopic = topic.replace(mqttTopicSeparator, kafkaTopicSeparator);
 
-        ProducerRecord producerRecord = new ProducerRecord<String, byte[]>(kafkaTopic, message.getPayload());
-        if(kafkaIncludeTopicName) {
-            String json;
-            ObjectMapper mapper = new ObjectMapper();
-            try {
-                KafkaMessage kafkaMessage = new KafkaMessage(topic, new String(message.getPayload()));
-                json = mapper.writeValueAsString(kafkaMessage);
-                producerRecord = new ProducerRecord<String, String>(kafkaTopic, json);
-            } catch (JsonProcessingException e) {
-                logger.error("Oops, an error occurred while creating json for message. \n {}", message.getPayload(), e);
-            }
+        ProducerRecord producerRecord;
+        if(kafkaIncludeKey) {
+            producerRecord = new ProducerRecord<>(kafkaTopic, topic, new String(message.getPayload()));
+        } else {
+            producerRecord = new ProducerRecord(kafkaTopic, new String(message.getPayload()));
         }
         Callback callback = (RecordMetadata metadata, Exception e) -> {
             if (e == null) {
