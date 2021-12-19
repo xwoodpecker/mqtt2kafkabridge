@@ -5,6 +5,7 @@ import org.apache.kafka.common.serialization.*;
 import org.apache.logging.log4j.*;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.eclipse.paho.client.mqttv3.*;
+import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 
 import javax.net.SocketFactory;
 import javax.net.ssl.KeyManagerFactory;
@@ -54,6 +55,7 @@ public class Mqtt2KafkaBridge implements MqttCallbackExtended {
         kafkaTopicSeparator = Optional.ofNullable(System.getenv("KAFKA_TOPIC_SEPARATOR")).orElse(".");
         // added with fork:
         Boolean mqttCleanSession = Boolean.parseBoolean(Optional.ofNullable(System.getenv("MQTT_CLEAN_SESSION")).orElse("true"));
+        Integer mqttMaxInflight = Integer.parseInt(Optional.ofNullable(System.getenv("MQTT_MAX_INFLIGHT")).orElse("10"));
         String mqttClientCaFile = Optional.ofNullable(System.getenv("MQTT_CLIENT_CA_FILE")).orElse("");
         String mqttClientCertFile = Optional.ofNullable(System.getenv("MQTT_CLIENT_CERT_FILE")).orElse("");
         String mqttClientKeyFile = Optional.ofNullable(System.getenv("MQTT_CLIENT_KEY_FILE")).orElse("");
@@ -68,8 +70,10 @@ public class Mqtt2KafkaBridge implements MqttCallbackExtended {
                     "MQTT_AUTOMATIC_RECONNECT={} \n " +
                     "MQTT_TOPIC_SEPARATOR={} \n " +
                     "MQTT_TOPIC_FILTER={} \n" +
-                    "MQTT_CLEAN_SESSION",
-                clientId, kafkaHost, kafkaTopicSeparator, mqttBrokerHost, mqttBrokerUser, mqttAutomaticReconnect, mqttTopicSeparator, mqttTopics, mqttCleanSession
+                    "MQTT_CLEAN_SESSION={} \n" +
+                    "MQTT_MAX_INFLIGHT= {}",
+                clientId, kafkaHost, kafkaTopicSeparator, mqttBrokerHost, mqttBrokerUser, mqttAutomaticReconnect,
+                mqttTopicSeparator, mqttTopics, mqttCleanSession, mqttMaxInflight
         );
 
         kafkaProducerProperties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaHost);
@@ -81,7 +85,6 @@ public class Mqtt2KafkaBridge implements MqttCallbackExtended {
             logger.info("Connecting to MQTT and Kafka broker.");
 
             MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
-            mqttClient = new MqttClient("tcp://" + mqttBrokerHost, clientId);
             kafkaProducer = new KafkaProducer<>(kafkaProducerProperties);
 
             mqttConnectOptions.setUserName(mqttBrokerUser);
@@ -89,13 +92,22 @@ public class Mqtt2KafkaBridge implements MqttCallbackExtended {
             mqttConnectOptions.setAutomaticReconnect(mqttAutomaticReconnect);
             //added CleanSession and SocketFactory
             mqttConnectOptions.setCleanSession(mqttCleanSession);
+            mqttConnectOptions.setMaxInflight(mqttMaxInflight);
 
+            boolean useSSL = false;
             if(!mqttClientCaFile.isEmpty() && !mqttClientCertFile.isEmpty() && !mqttClientKeyFile.isEmpty()) {
                 SocketFactory sf = getSSLSocketFactory(mqttClientCaFile, mqttClientCertFile, mqttClientKeyFile);
-                if(sf != null)
+                if(sf != null) {
                     mqttConnectOptions.setSocketFactory(sf);
+                    useSSL = true;
+                }
             }
 
+            String protocol = useSSL ? "ssl" : "tcp";
+            // generate a new clientId in case a clean session is used
+            if(mqttCleanSession)
+                clientId = MqttClient.generateClientId();
+            mqttClient = new MqttClient(protocol + "://"+ mqttBrokerHost, clientId, new MemoryPersistence());
             mqttClient.setCallback(this);
             mqttClient.connect(mqttConnectOptions);
 
